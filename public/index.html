@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SEO Product Mapper</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css" integrity="sha512-PHPH5wCFYI8a9kaI0s5momkGLumZ5qX6Ch12HaxDTXhMHDL/95B2S/bRMyCV2wE8pQnH3UX0eD+s/rs24kTxFg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <style>
+      body {
+        background-color: #0f172a;
+        color: #e2e8f0;
+        min-height: 100vh;
+      }
+      .glass {
+        background: rgba(15, 23, 42, 0.75);
+        border: 1px solid rgba(148, 163, 184, 0.15);
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.45);
+        backdrop-filter: blur(16px);
+      }
+      .gradient-border {
+        position: relative;
+      }
+      .gradient-border::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 1rem;
+        padding: 1px;
+        background: linear-gradient(135deg, rgba(56, 189, 248, 0.6), rgba(168, 85, 247, 0.6));
+        -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+        -webkit-mask-composite: xor;
+        mask-composite: exclude;
+      }
+      .gradient-border > * {
+        position: relative;
+        z-index: 1;
+      }
+      .scrollbar::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      .scrollbar::-webkit-scrollbar-thumb {
+        background: rgba(148, 163, 184, 0.4);
+        border-radius: 9999px;
+      }
+      .scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+      }
+    </style>
+  </head>
+  <body class="p-4 md:p-8">
+    <div id="app" class="max-w-7xl mx-auto space-y-6">
+      <header class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <h1 class="text-3xl font-bold text-sky-300">🏷️ XLSX SEO Product Mapper</h1>
+          <p class="text-slate-300 mt-2">Присвоение SEO-структуры товарам с контролем качества и опциональным использованием OpenAI.</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="text-sm text-slate-400">ID сессии:</span>
+          <code class="px-3 py-1 rounded-md bg-slate-800 text-slate-200 text-sm truncate max-w-xs">{{ state.sessionId || '—' }}</code>
+          <button
+            class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition text-sm"
+            @click="resetWorkspace"
+          >
+            🔄 Сбросить
+          </button>
+        </div>
+      </header>
+
+      <main class="grid lg:grid-cols-[320px,1fr] gap-6">
+        <!-- Sidebar -->
+        <aside class="gradient-border rounded-2xl">
+          <div class="glass rounded-2xl p-5 space-y-6">
+            <div>
+              <h2 class="text-lg font-semibold text-sky-200 flex items-center gap-2"><i class="fa-solid fa-sliders"></i> Настройки</h2>
+              <div class="mt-4 space-y-4 text-sm">
+                <label class="block">
+                  <span class="text-slate-300">Порог сходства (cosine)</span>
+                  <input type="number" step="0.01" min="0" max="1" v-model.number="state.thresholds.similarity" class="mt-1 w-full rounded-md bg-slate-900 border border-slate-700 px-3 py-2" />
+                </label>
+                <label class="block">
+                  <span class="text-slate-300">Минимальный отрыв от 2-го кандидата</span>
+                  <input type="number" step="0.01" min="0" max="1" v-model.number="state.thresholds.gap" class="mt-1 w-full rounded-md bg-slate-900 border border-slate-700 px-3 py-2" />
+                </label>
+                <label class="block">
+                  <span class="text-slate-300">Совпадений специализированных токенов</span>
+                  <input type="number" min="0" max="5" v-model.number="state.thresholds.overlap" class="mt-1 w-full rounded-md bg-slate-900 border border-slate-700 px-3 py-2" />
+                </label>
+                <label class="block">
+                  <span class="text-slate-300">Минимальная уверенность (%)</span>
+                  <input type="number" min="0" max="100" v-model.number="state.thresholds.confidence" class="mt-1 w-full rounded-md bg-slate-900 border border-slate-700 px-3 py-2" />
+                </label>
+              </div>
+            </div>
+
+            <div class="space-y-3">
+              <label class="flex items-center gap-3 text-sm text-slate-300">
+                <input type="checkbox" v-model="state.useOpenAI" class="w-4 h-4" />
+                Использовать OpenAI для сложных случаев
+              </label>
+              <input
+                :disabled="!state.useOpenAI"
+                type="password"
+                placeholder="OpenAI API Key"
+                v-model="state.apiKey"
+                class="w-full rounded-md bg-slate-900 border border-slate-700 px-3 py-2 text-sm disabled:opacity-50"
+              />
+              <p class="text-xs text-slate-400">
+                Ключ хранится локально в браузере и передаётся на сервер только для обработки.
+              </p>
+            </div>
+
+            <div class="border border-slate-700 rounded-xl p-4 bg-slate-900/40">
+              <h3 class="text-sm font-semibold text-sky-200 uppercase tracking-wide">Шаги</h3>
+              <ol class="mt-3 space-y-2 text-sm text-slate-300">
+                <li>1️⃣ Загрузите SEO структуру</li>
+                <li>2️⃣ Загрузите файл(ы) с товарами</li>
+                <li>3️⃣ Нажмите «Запустить обработку»</li>
+              </ol>
+            </div>
+          </div>
+        </aside>
+
+        <!-- Content -->
+        <section class="space-y-6">
+          <!-- Upload cards -->
+          <div class="grid md:grid-cols-2 gap-6">
+            <div class="glass rounded-2xl p-6 space-y-4">
+              <div class="flex items-center justify-between">
+                <h2 class="text-xl font-semibold text-sky-200 flex items-center gap-2"><i class="fa-solid fa-sitemap"></i> SEO структура</h2>
+                <span class="text-xs px-3 py-1 rounded-full" :class="state.seoLoaded ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700 text-slate-300'">
+                  {{ state.seoLoaded ? `${state.seoCount} категорий` : 'Не загружено' }}
+                </span>
+              </div>
+              <p class="text-sm text-slate-300">Файл XLSX с путями вида <code>Основная///Подкатегория</code>. Первая колонка — путь.</p>
+              <label class="block border border-dashed border-slate-700 rounded-xl p-4 text-center cursor-pointer hover:border-sky-400 transition">
+                <input type="file" accept=".xlsx" class="hidden" @change="onSeoUpload" />
+                <div class="space-y-2 text-slate-300">
+                  <i class="fa-solid fa-cloud-arrow-up text-2xl text-sky-300"></i>
+                  <p class="text-sm">Выберите файл SEO структуры</p>
+                  <p v-if="state.isLoadingSeo" class="text-xs text-amber-300">Загрузка...</p>
+                </div>
+              </label>
+            </div>
+
+            <div class="glass rounded-2xl p-6 space-y-4">
+              <div class="flex items-center justify-between">
+                <h2 class="text-xl font-semibold text-sky-200 flex items-center gap-2"><i class="fa-solid fa-box"></i> Файлы товаров</h2>
+                <span class="text-xs px-3 py-1 rounded-full bg-slate-700 text-slate-300">{{ state.products.length }} файлов</span>
+              </div>
+              <p class="text-sm text-slate-300">Каждый файл должен содержать колонки <em>Category</em> и <em>Product name</em>. Бренд будет извлечён из имени файла.</p>
+              <label class="block border border-dashed border-slate-700 rounded-xl p-4 text-center cursor-pointer hover:border-sky-400 transition">
+                <input type="file" accept=".xlsx" multiple class="hidden" @change="onProductsUpload" />
+                <div class="space-y-2 text-slate-300">
+                  <i class="fa-solid fa-file-circle-plus text-2xl text-emerald-300"></i>
+                  <p class="text-sm">Добавить файлы товаров</p>
+                  <p v-if="state.isUploadingProducts" class="text-xs text-amber-300">Загрузка...</p>
+                </div>
+              </label>
+              <ul v-if="state.products.length" class="space-y-2 max-h-40 overflow-auto scrollbar text-sm">
+                <li v-for="product in state.products" :key="product.id" class="flex items-center justify-between bg-slate-900/60 px-3 py-2 rounded-lg">
+                  <div>
+                    <p class="font-medium text-slate-200">{{ product.sourceFile }}</p>
+                    <p class="text-xs text-slate-400">{{ product.totalProducts }} товаров • {{ product.brandName || 'Бренд не определён' }}</p>
+                  </div>
+                  <span class="text-xs" :class="product.hasResults ? 'text-emerald-300' : 'text-slate-400'">{{ product.hasResults ? 'обработан' : 'ожидает' }}</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- Processing -->
+          <div class="glass rounded-2xl p-6 space-y-4">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <h2 class="text-xl font-semibold text-sky-200 flex items-center gap-2"><i class="fa-solid fa-rocket"></i> Обработка</h2>
+                <p class="text-sm text-slate-300">Нажмите кнопку, чтобы запустить сопоставление. Прогресс отображается по каждому файлу.</p>
+              </div>
+              <button
+                class="px-5 py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-sky-500 to-purple-500 text-white shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                :disabled="state.isRunning || !state.seoLoaded || !state.products.length"
+                @click="runProcessing"
+              >
+                <span v-if="state.isRunning" class="flex items-center gap-2"><i class="fa-solid fa-spinner fa-spin"></i> Обработка...</span>
+                <span v-else>🚀 Запустить обработку</span>
+              </button>
+            </div>
+
+            <div v-if="state.runProgress.length" class="space-y-3">
+              <div v-for="item in state.runProgress" :key="item.productId" class="bg-slate-900/50 rounded-lg p-3">
+                <div class="flex items-center justify-between text-sm text-slate-300">
+                  <span>{{ item.fileName }}</span>
+                  <span>{{ item.statusText }}</span>
+                </div>
+                <div class="mt-2 h-2 rounded-full bg-slate-800">
+                  <div class="h-full rounded-full bg-sky-400 transition-all" :style="{ width: item.progress + '%' }"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Statistics -->
+          <div v-if="state.summary.totalProducts" class="glass rounded-2xl p-6">
+            <h2 class="text-xl font-semibold text-sky-200 flex items-center gap-2"><i class="fa-solid fa-chart-line"></i> Итоги</h2>
+            <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+              <div class="bg-slate-900/60 rounded-xl p-4">
+                <p class="text-xs uppercase text-slate-400">Всего товаров</p>
+                <p class="text-2xl font-bold text-sky-300">{{ state.summary.totalProducts }}</p>
+              </div>
+              <div class="bg-slate-900/60 rounded-xl p-4">
+                <p class="text-xs uppercase text-slate-400">Сопоставлено</p>
+                <p class="text-2xl font-bold text-emerald-300">{{ state.summary.mapped }}</p>
+              </div>
+              <div class="bg-slate-900/60 rounded-xl p-4">
+                <p class="text-xs uppercase text-slate-400">Не найдено</p>
+                <p class="text-2xl font-bold text-amber-300">{{ state.summary.unmapped }}</p>
+              </div>
+              <div class="bg-slate-900/60 rounded-xl p-4">
+                <p class="text-xs uppercase text-slate-400">Успешность</p>
+                <p class="text-2xl font-bold text-purple-300">{{ state.summary.successRate.toFixed(1) }}%</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Results table -->
+          <div v-if="state.results.length" class="glass rounded-2xl p-6 space-y-4">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div>
+                <h2 class="text-xl font-semibold text-sky-200 flex items-center gap-2"><i class="fa-solid fa-table"></i> Результаты</h2>
+                <p class="text-sm text-slate-300">Выберите файл, чтобы просмотреть сопоставления и скачать XLSX.</p>
+              </div>
+              <div class="flex items-center gap-4 text-sm">
+                <label class="flex items-center gap-2 text-slate-300">
+                  <input type="checkbox" v-model="state.showMappedOnly" /> Только сопоставленные
+                </label>
+                <button
+                  class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition"
+                  @click="downloadZip"
+                  :disabled="!state.results.some(r => r.hasResults)"
+                >
+                  <i class="fa-solid fa-download mr-2"></i>Скачать все (ZIP)
+                </button>
+              </div>
+            </div>
+
+            <div class="flex flex-col lg:flex-row gap-4">
+              <aside class="lg:w-64 space-y-2 max-h-64 overflow-auto scrollbar">
+                <button
+                  v-for="product in state.results"
+                  :key="product.id"
+                  class="w-full text-left px-4 py-3 rounded-lg border border-slate-700 hover:border-sky-400 transition"
+                  :class="product.id === state.selectedProductId ? 'bg-sky-500/10 border-sky-400' : 'bg-slate-900/40'"
+                  @click="state.selectedProductId = product.id"
+                >
+                  <p class="font-medium text-slate-100 truncate">{{ product.sourceFile }}</p>
+                  <p class="text-xs text-slate-400">{{ product.totalProducts }} товаров</p>
+                  <p class="text-xs" :class="product.hasResults ? 'text-emerald-300' : 'text-amber-300'">
+                    {{ product.hasResults ? 'готово' : 'не обработано' }}
+                  </p>
+                </button>
+              </aside>
+              <div class="flex-1">
+                <div v-if="!currentResult" class="text-sm text-slate-300">Выберите файл слева, чтобы увидеть детали.</div>
+                <div v-else class="space-y-3">
+                  <div class="flex items-center justify-between">
+                    <h3 class="text-lg font-semibold text-slate-200">{{ currentResult.sourceFile }}</h3>
+                    <button
+                      class="px-4 py-2 rounded-lg bg-emerald-500/20 text-emerald-200 border border-emerald-500/40 hover:bg-emerald-500/30 transition text-sm"
+                      @click="downloadSingle(currentResult.id)"
+                      :disabled="!currentResult.hasResults"
+                    >
+                      <i class="fa-solid fa-file-arrow-down mr-2"></i>Скачать XLSX
+                    </button>
+                  </div>
+                  <div class="overflow-auto scrollbar max-h-96">
+                    <table class="min-w-full text-left text-sm">
+                      <thead class="sticky top-0 bg-slate-900">
+                        <tr class="text-slate-400 uppercase text-xs">
+                          <th class="px-3 py-2">Товар</th>
+                          <th class="px-3 py-2">Старая категория</th>
+                          <th class="px-3 py-2">SEO категория</th>
+                          <th class="px-3 py-2">Уверенность</th>
+                          <th class="px-3 py-2">Статус</th>
+                          <th class="px-3 py-2">Комментарий</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr
+                          v-for="item in filteredItems"
+                          :key="item.id"
+                          class="border-b border-slate-800 last:border-none hover:bg-slate-900/40"
+                        >
+                          <td class="px-3 py-2 text-slate-100">{{ item.productName || '—' }}</td>
+                          <td class="px-3 py-2 text-slate-300">{{ item.categoryOld || '—' }}</td>
+                          <td class="px-3 py-2" :class="item.seoCategory ? 'text-emerald-300' : 'text-amber-300'">{{ item.seoCategory || 'Не найдено' }}</td>
+                          <td class="px-3 py-2 text-slate-300">{{ item.confidence }}%</td>
+                          <td class="px-3 py-2">
+                            <span
+                              class="px-2 py-1 rounded-full text-xs"
+                              :class="item.status === 'mapped' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/20 text-amber-200'"
+                            >
+                              {{ item.status === 'mapped' ? 'Сопоставлено' : 'Не найдено' }}
+                            </span>
+                          </td>
+                          <td class="px-3 py-2 text-slate-400 whitespace-pre-line">{{ item.reason }}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <transition name="fade">
+        <div v-if="state.toast" class="fixed bottom-6 right-6 px-4 py-3 rounded-lg bg-slate-900/90 border border-slate-700 shadow-lg text-sm text-slate-100">
+          {{ state.toast.message }}
+        </div>
+      </transition>
+    </div>
+
+    <script>
+      const { createApp, reactive, computed, onMounted, watch } = Vue
+
+      const app = createApp({
+        setup() {
+          const state = reactive({
+            sessionId: '',
+            seoLoaded: false,
+            seoCount: 0,
+            products: [],
+            results: [],
+            thresholds: {
+              similarity: 0.55,
+              gap: 0.05,
+              overlap: 1,
+              confidence: 50
+            },
+            useOpenAI: false,
+            apiKey: localStorage.getItem('seo-openai-key') || '',
+            isLoadingSeo: false,
+            isUploadingProducts: false,
+            isRunning: false,
+            runProgress: [],
+            showMappedOnly: false,
+            selectedProductId: null,
+            summary: {
+              totalProducts: 0,
+              mapped: 0,
+              unmapped: 0,
+              successRate: 0
+            },
+            toast: null
+          })
+
+          watch(() => state.apiKey, (value) => {
+            if (value) {
+              localStorage.setItem('seo-openai-key', value)
+            } else {
+              localStorage.removeItem('seo-openai-key')
+            }
+          })
+
+          const currentResult = computed(() => state.results.find((item) => item.id === state.selectedProductId))
+
+          const filteredItems = computed(() => {
+            if (!currentResult.value || !currentResult.value.mappedItems) return []
+            const items = currentResult.value.mappedItems
+            return state.showMappedOnly ? items.filter((item) => item.status === 'mapped') : items
+          })
+
+          function showToast(message) {
+            state.toast = { message }
+            setTimeout(() => {
+              state.toast = null
+            }, 3000)
+          }
+
+          async function createSession() {
+            const response = await fetch('/api/session', { method: 'POST' })
+            if (!response.ok) throw new Error('Не удалось создать сессию')
+            const data = await response.json()
+            state.sessionId = data.sessionId
+          }
+
+          async function resetWorkspace() {
+            if (!state.sessionId) return
+            await fetch(`/api/session/${state.sessionId}/reset`, { method: 'DELETE' })
+            state.seoLoaded = false
+            state.seoCount = 0
+            state.products = []
+            state.results = []
+            state.runProgress = []
+            state.summary = { totalProducts: 0, mapped: 0, unmapped: 0, successRate: 0 }
+            showToast('Сессия сброшена')
+            await refreshSession()
+          }
+
+          async function onSeoUpload(event) {
+            if (!event.target.files?.length || !state.sessionId) return
+            const file = event.target.files[0]
+            state.isLoadingSeo = true
+            try {
+              const form = new FormData()
+              form.append('file', file)
+              const response = await fetch(`/api/session/${state.sessionId}/seo`, {
+                method: 'POST',
+                body: form
+              })
+              const data = await response.json()
+              if (!response.ok) throw new Error(data.error || 'Ошибка загрузки SEO структуры')
+              state.seoLoaded = true
+              state.seoCount = data.categoriesCount
+              showToast(`SEO структура загружена (${data.categoriesCount} категорий)`)            
+            } catch (error) {
+              console.error(error)
+              showToast(error.message || 'Не удалось загрузить SEO структуру')
+            } finally {
+              state.isLoadingSeo = false
+              event.target.value = ''
+              await refreshSession()
+            }
+          }
+
+          async function onProductsUpload(event) {
+            if (!event.target.files?.length || !state.sessionId) return
+            state.isUploadingProducts = true
+            try {
+              for (const file of event.target.files) {
+                const form = new FormData()
+                form.append('file', file)
+                const response = await fetch(`/api/session/${state.sessionId}/products`, {
+                  method: 'POST',
+                  body: form
+                })
+                const data = await response.json()
+                if (!response.ok) throw new Error(data.error || `Ошибка загрузки файла ${file.name}`)
+                showToast(`Загружен файл ${data.sourceFile} (${data.totalProducts} товаров)`)              }
+            } catch (error) {
+              console.error(error)
+              showToast(error.message || 'Не удалось загрузить товары')
+            } finally {
+              state.isUploadingProducts = false
+              event.target.value = ''
+              await refreshSession()
+            }
+          }
+
+          async function refreshSession() {
+            if (!state.sessionId) return
+            const response = await fetch(`/api/session/${state.sessionId}/results`)
+            if (!response.ok) return
+            const data = await response.json()
+            state.products = data.products
+            state.results = data.products
+            if (!state.selectedProductId && data.products.length) {
+              state.selectedProductId = data.products[0].id
+            }
+
+            const totals = data.products.reduce((acc, product) => {
+              if (!product.hasResults || !product.stats) return acc
+              acc.total += product.stats.totalProducts
+              acc.mapped += product.stats.mappedProducts
+              acc.unmapped += product.stats.unmappedProducts
+              return acc
+            }, { total: 0, mapped: 0, unmapped: 0 })
+
+            state.summary.totalProducts = totals.total
+            state.summary.mapped = totals.mapped
+            state.summary.unmapped = totals.unmapped
+            state.summary.successRate = totals.total ? (totals.mapped / totals.total) * 100 : 0
+          }
+
+          async function runProcessing() {
+            if (!state.sessionId) return
+            state.isRunning = true
+            state.runProgress = state.products.map((product) => ({
+              productId: product.id,
+              fileName: product.sourceFile,
+              progress: product.hasResults ? 100 : 0,
+              statusText: product.hasResults ? 'готово' : 'в ожидании'
+            }))
+            try {
+              const body = {
+                options: {
+                  similarityThreshold: state.thresholds.similarity,
+                  gapThreshold: state.thresholds.gap,
+                  tokenOverlapThreshold: state.thresholds.overlap,
+                  confidenceMinPercent: state.thresholds.confidence,
+                  useOpenAI: state.useOpenAI,
+                  openAIApiKey: state.useOpenAI ? state.apiKey : undefined
+                }
+              }
+
+              const response = await fetch(`/api/session/${state.sessionId}/run`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+              })
+              const data = await response.json()
+              if (!response.ok) throw new Error(data.error || 'Ошибка обработки')
+              state.runProgress = state.runProgress.map((item) => ({
+                ...item,
+                progress: 100,
+                statusText: 'готово'
+              }))
+              showToast('Обработка завершена')
+            } catch (error) {
+              console.error(error)
+              showToast(error.message || 'Не удалось выполнить обработку')
+            } finally {
+              state.isRunning = false
+              await refreshSession()
+            }
+          }
+
+          async function downloadFile(url, filename) {
+            const response = await fetch(url)
+            if (!response.ok) {
+              const error = await response.json().catch(() => ({ error: 'Ошибка скачивания' }))
+              throw new Error(error.error || 'Ошибка скачивания')
+            }
+            const blob = await response.blob()
+            const blobUrl = URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = blobUrl
+            link.download = filename
+            document.body.appendChild(link)
+            link.click()
+            link.remove()
+            URL.revokeObjectURL(blobUrl)
+          }
+
+          async function downloadSingle(productId) {
+            if (!state.sessionId) return
+            const product = state.results.find((item) => item.id === productId)
+            if (!product || !product.hasResults) {
+              showToast('Нет результата для скачивания')
+              return
+            }
+            try {
+              await downloadFile(`/api/session/${state.sessionId}/download/${productId}`, `processed_${product.sourceFile}`)
+            } catch (error) {
+              console.error(error)
+              showToast(error.message || 'Не удалось скачать файл')
+            }
+          }
+
+          async function downloadZip() {
+            if (!state.sessionId) return
+            try {
+              await downloadFile(`/api/session/${state.sessionId}/download`, `processed_products_${Date.now()}.zip`)
+            } catch (error) {
+              console.error(error)
+              showToast(error.message || 'Не удалось скачать архив')
+            }
+          }
+
+          onMounted(async () => {
+            try {
+              await createSession()
+              await refreshSession()
+            } catch (error) {
+              console.error(error)
+              showToast('Не удалось инициализировать приложение')
+            }
+          })
+
+          return {
+            state,
+            currentResult,
+            filteredItems,
+            onSeoUpload,
+            onProductsUpload,
+            runProcessing,
+            downloadSingle,
+            downloadZip,
+            resetWorkspace
+          }
+        }
+      })
+
+      app.mount('#app')
+    </script>
+  </body>
+</html>
